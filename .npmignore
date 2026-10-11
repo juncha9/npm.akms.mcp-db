@@ -10,6 +10,10 @@ tsconfig*.json
 tsup.config.ts
 vitest.config.ts
 coverage/
+[Ll]ogs/
+*.log
+*.tgz
+DESIGN.md
 
 [Ss]rc/
 [Tt]ests/
