@@ -1,0 +1,30 @@
+/** Every setting is an environment variable in this server's own MCP entry — one entry per database. */
+export const DB_ENV = {
+    DRIVER: "DB_DRIVER",
+    URL: "DB_URL",
+    HOST: "DB_HOST",
+    PORT: "DB_PORT",
+    NAME: "DB_NAME",
+    USER: "DB_USER",
+    PASSWORD: "DB_PASSWORD",
+    SSL: "DB_SSL",
+    SSL_CA: "DB_SSL_CA",
+    ALIAS: "DB_ALIAS",
+    DESCRIPTION: "DB_DESCRIPTION",
+    SSH_HOST: "DB_SSH_HOST",
+    SSH_PORT: "DB_SSH_PORT",
+    SSH_USER: "DB_SSH_USER",
+    SSH_KEY: "DB_SSH_KEY",
+    SSH_PASSPHRASE: "DB_SSH_PASSPHRASE",
+    SSH_PASSWORD: "DB_SSH_PASSWORD",
+    SSH_HOST_KEY: "DB_SSH_HOST_KEY",
+    READONLY: "DB_READONLY",
+    ALLOW_DDL: "DB_ALLOW_DDL",
+    DENY_PATTERNS: "DB_DENY_PATTERNS",
+    STATEMENT_TIMEOUT_MS: "DB_STATEMENT_TIMEOUT_MS",
+    CONNECT_TIMEOUT_MS: "DB_CONNECT_TIMEOUT_MS",
+    MAX_ROWS: "DB_MAX_ROWS",
+    MAX_OUTPUT_CHARACTERS: "DB_MAX_OUTPUT",
+} as const;
+
+export const LOG_LEVEL_ENV = "DB_MCP_LOG_LEVEL";

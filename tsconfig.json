@@ -1,0 +1,32 @@
+{
+    "compilerOptions": {
+        "moduleResolution": "Bundler",
+        "baseUrl": "./src/",
+        "paths": {
+            "@/*": [ "./*" ]
+        },
+        "sourceMap": true,
+        "strict": true,
+        "esModuleInterop": true,
+        "resolveJsonModule": true,
+        "allowSyntheticDefaultImports": true,
+        "forceConsistentCasingInFileNames": true,
+        "useDefineForClassFields": false,
+        "noImplicitAny": false,
+        "strictNullChecks": true,
+        "strictFunctionTypes": true,
+
+        "outDir": "./lib",
+        "target": "ES2022",
+        "module": "ESNext",
+        "lib": [ "ES2022" ],
+        "types": [ "node" ],
+        "skipLibCheck": true,
+        "declaration": true,
+        "declarationMap": true,
+        "isolatedModules": true,
+        "verbatimModuleSyntax": false
+    },
+    "include": [ "src", "tests" ],
+    "exclude": [ "node_modules", "lib" ]
+}

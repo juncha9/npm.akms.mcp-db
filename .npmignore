@@ -1,0 +1,15 @@
+.claude/
+.github/
+.git
+.gitignore
+.vscode
+.env*
+!.env.example
+node_modules/
+tsconfig*.json
+tsup.config.ts
+vitest.config.ts
+coverage/
+
+[Ss]rc/
+[Tt]ests/
