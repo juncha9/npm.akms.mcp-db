@@ -177,8 +177,10 @@ describe("config — adding a database", () => {
     }, 30000);
 
     it("lists every setting with its value, required ones marked", async () => {
-        const { screen } = await runScript(["a", "database", "shop", "cancel", "y", "q"]);
+        // The driver row opens a select with the one driver there is, and comes back unchanged
+        const { screen } = await runScript(["a", "driver", "postgres", "database", "shop", "cancel", "y", "q"]);
 
+        expect(screen).toMatch(/Driver {12}PostgreSQL/);
         expect(screen).toMatch(/Host {14}\(required\)/);
         expect(screen).toMatch(/Database {10}\(required\)/);
         expect(screen).toMatch(/Database {10}shop/);

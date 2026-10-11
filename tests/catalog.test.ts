@@ -152,6 +152,9 @@ describe("catalog tools against PGlite", () => {
     it("marks an INVALID index, and finds quoted names the way SQL writes them", async () => {
         const quoted = await callTool("db_describe", { table: "\"Cat_Mixed\".\"OrderLine\"" });
         expect(quoted).toMatch(/orderline_dup_uq\s+.*INVALID — unusable; drop and recreate/);
+        // The planner never uses an invalid index, so its count is 0 whatever else ran; the heading says since when
+        expect(quoted).toMatch(/indexes \(scans counted since (the server's statistics began|\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)/);
+        expect(quoted).toMatch(/orderline_dup_uq\s+\S+ (bytes|kB|MB) · 0 scans · INVALID/);
 
         const separate = await callTool("db_describe", { table: "\"OrderLine\"", schema: "\"Cat_Mixed\"" });
         // Names come back as SQL writes them, so a copied name means the same object in a query

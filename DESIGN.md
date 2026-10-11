@@ -18,7 +18,9 @@
 
 The driver boundary is three places: connecting, running a query, and the catalog SQL. The abstraction does not grow past them.
 
-`postgres-mcp`'s `analyze_db_health`, `get_top_queries` and index recommendations are not reproduced. When they are needed, read `pg_stat_statements` through `db_query`.
+The `config` form's first row is the driver, with PostgreSQL as its only choice (2026-10-11: the user wanted the type visible and selectable from the start, even with one option). A second driver widens `DbDriverName`, adds its label to the form's driver list, and makes the port default, the SSL wording and the connection check follow the pick; `entryToAnswers` then reads `DB_DRIVER` back instead of assuming `postgres`.
+
+`postgres-mcp`'s `analyze_db_health`, `get_top_queries` and index recommendations are not reproduced. When they are needed, read `pg_stat_statements` through `db_query`. Reviewed again against postgres-mcp 0.3.0 on 2026-10-11: the one piece taken is the index scan count (`pg_stat_all_indexes.idx_scan`) on `db_describe`'s index lines, since dropping an index is a decision made from that screen; `GENERIC_PLAN` for `db_explain`, sequence usage, the extension list and the health checks were judged not worth their surface until a real need shows.
 
 ## 3. User decisions
 

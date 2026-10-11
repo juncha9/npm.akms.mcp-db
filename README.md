@@ -15,7 +15,7 @@ Node ≥ 22. PostgreSQL 12 or later, only PostgreSQL for now.
 
 ## ⚙️ MCP client setup
 
-**Let the CLI write it.** `config` opens a small manager for the databases registered in a client's config. It asks plain questions — host, database, user, password, SSL, tunnel or not, read-only — tests the connection, offers to pin the SSH host key, and writes the entry. No `DB_*` name has to be remembered.
+**Let the CLI write it.** `config` opens a small manager for the databases registered in a client's config. It asks plain questions — driver (PostgreSQL, the only one so far), host, database, user, password, SSL, tunnel or not, read-only — tests the connection, offers to pin the SSH host key, and writes the entry. No `DB_*` name has to be remembered.
 
 ```bash
 npx -y @akms/mcp-db config                  # opens on the first client found on this machine
@@ -139,7 +139,7 @@ A malformed value fails startup: `DB_READONLY=ture` is an error, not "writable";
 | `db_query` | Run SQL — one or several statements, optional `params` (`$1`, `$2`, … with a single statement; pass bigint ids and exact decimals as strings), optional `transaction: false` |
 | `db_schemas` | Schemas with owner and table / view / sequence counts |
 | `db_tables` | One schema's tables, views, sequences (approx rows, size, comment) and its enum / domain / composite types. A partitioned table shows its partitions' total size and rows |
-| `db_describe` | Columns, constraints, foreign keys pointing in, indexes (an `INVALID` one marked, with what to do about it), triggers, partitions and `INHERITS` children, a sequence's settings, view definition |
+| `db_describe` | Columns, constraints, foreign keys pointing in, indexes with size and scan count since the statistics were last reset (an `INVALID` one marked, with what to do about it; a standby counts its own scans), triggers, partitions and `INHERITS` children, a sequence's settings, view definition |
 | `db_explain` | The plan of one statement (send it without `EXPLAIN`); `analyze: true` runs it inside a transaction that is always rolled back. A prepared statement does not outlive its call — send its own SQL, with the values in `params` and its declared parameter types as casts (`$1::numeric`) |
 
 The catalog tools read a name as SQL does — `"MixedCase"` in double quotes, an unquoted name folded to lower case (then, failing that, tried as typed), each argument by its own quotes — and print every name the way SQL has to write it: schemas, tables, columns, types, constraints, indexes, quoted where needed and schema-qualified where they name another table (partitions, parents, a sequence's owner, foreign keys pointing in). A name with no schema is looked up on the session's `search_path`, as SQL does — so a table named without its schema inside a printed definition (a foreign key, a trigger) resolves to the same object. A copied name means the same object in a query. When the same spelling also names another schema or table (`"Users"` beside `users`), a note says so. A separate `schema` argument is one name, dots included.

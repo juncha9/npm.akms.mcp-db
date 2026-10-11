@@ -9,6 +9,7 @@ import { loadDbProfile } from "@/modules/profile";
 function createAnswers(overrides?: Partial<DbSetupAnswers>): DbSetupAnswers {
     return {
         name: "pg_akms",
+        driver: "postgres",
         host: "10.0.0.5",
         port: 5432,
         database: "akms",

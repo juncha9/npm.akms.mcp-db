@@ -1,4 +1,4 @@
-import type { SslMode } from "./profile";
+import type { DbDriverName, SslMode } from "./profile";
 
 /** One `mcpServers` entry as every MCP client spells it: a stdio command plus its env block. */
 export interface McpServerEntry {
@@ -16,6 +16,8 @@ export type SshAuthMethod = "key" | "password" | "agent";
 export interface DbSetupAnswers {
     /** The entry key — the name the agent sees in its tool list. */
     name: string;
+    /** Written as `DB_DRIVER`; the form's first row, so a second driver slots in there. */
+    driver: DbDriverName;
     host: string;
     port: number;
     database: string;

@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import type { Writable } from "node:stream";
 import { DEFAULT_POSTGRES_PORT, DEFAULT_SSH_PORT, MAX_PORT } from "@/_defs";
-import type { DbSetupAnswers, SshAuthMethod, SslMode } from "@/_types";
+import type { DbDriverName, DbSetupAnswers, SshAuthMethod, SslMode } from "@/_types";
 import { expandHomePath } from "@/_libs/env";
 import { profileFromEnv, runConnectionCheck } from "./connection-check";
 import { SERVER_NAME_PATTERN, answersToEntry } from "./entry";
@@ -31,6 +31,7 @@ const FIELD_NAME_WIDTH = 18;
 type DbRoute = "direct" | "ssh";
 
 type FieldId =
+    | "driver"
     | "host" | "port" | "database" | "user" | "password" | "name"
     | "ssl" | "ssl-ca"
     | "description"
@@ -52,6 +53,7 @@ const FOLLOW_UPS: Partial<Record<FieldId, FieldId[]>> = {
 };
 
 const FIELD_NAMES: Record<FieldId, string> = {
+    "driver": "Driver",
     "host": "Host",
     "port": "Port",
     "database": "Database",
@@ -72,6 +74,11 @@ const FIELD_NAMES: Record<FieldId, string> = {
     "ssh-host-key": "SSH host key",
     "readonly": "Read-only",
     "ddl": "DDL",
+};
+
+/** One per supported driver — a second DBMS adds its row here, and its port default and SSL wording follow the pick. */
+const DRIVER_LABELS: Record<DbDriverName, string> = {
+    postgres: "PostgreSQL",
 };
 
 const AUTH_LABELS: Record<SshAuthMethod, string> = {
@@ -435,6 +442,8 @@ function buildRows(state: FormState, destination: string): SelectItem<FormValue>
     const { answers } = state;
     const rows: SelectItem<FormValue>[] = [];
 
+    rows.push(fieldRow("driver", DRIVER_LABELS[answers.driver], "the only driver so far"));
+
     let hostHint: string | undefined;
     if(state.route === "ssh") {
         hostHint = "resolved on the SSH host — a private RDS endpoint works";
@@ -613,6 +622,17 @@ async function testConnection(prompter: Prompter, output: Writable, state: FormS
  */
 async function editField(prompter: Prompter, output: Writable, state: FormState, id: FieldId): Promise<void> {
     const { answers } = state;
+
+    if(id === "driver") {
+        answers.driver = await prompter.select<DbDriverName>(
+            "Driver",
+            [
+                { value: "postgres", label: DRIVER_LABELS.postgres, hint: "PostgreSQL 12 or later" },
+            ],
+            { defaultValue: answers.driver },
+        );
+        return;
+    }
 
     if(id === "host") {
         let current: string | undefined;
@@ -839,6 +859,7 @@ export async function runDbForm(prompter: Prompter, output: Writable, options: D
         state = {
             answers: {
                 name: "",
+                driver: "postgres",
                 host: "",
                 port: DEFAULT_POSTGRES_PORT,
                 database: "",

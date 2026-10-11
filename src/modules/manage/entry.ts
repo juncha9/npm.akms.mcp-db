@@ -67,7 +67,7 @@ function launchCommand(): { command: string; args: string[] } {
 export function answersToEntry(answers: DbSetupAnswers): McpServerEntry {
     const env: Record<string, string> = {};
 
-    env[DB_ENV.DRIVER] = "postgres";
+    env[DB_ENV.DRIVER] = answers.driver;
     env[DB_ENV.HOST] = answers.host;
     if(answers.port !== DEFAULT_POSTGRES_PORT) {
         env[DB_ENV.PORT] = String(answers.port);
@@ -227,6 +227,8 @@ export function entryToAnswers(name: string, entry: McpServerEntry): DbSetupAnsw
 
     const answers: DbSetupAnswers = {
         name: name,
+        // The one driver the server accepts; reading DB_DRIVER back comes with the second one
+        driver: "postgres",
         host: connection.host,
         port: connection.port,
         database: connection.database,

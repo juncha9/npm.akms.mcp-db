@@ -906,11 +906,25 @@ export function formatRelationDescription(description: RelationDescription): str
         lines.push(...alignColumns(columnTable));
     }
 
+    // "0 scans" means nothing without knowing since when: a counter reset yesterday and an index unused for a year read the same
+    let indexesTitle = "indexes";
+    const firstIndex = description.indexes[0];
+    if(firstIndex?.scans != null) {
+        let since = "the server's statistics began";
+        if(firstIndex.stats_reset != null) {
+            since = textOf(firstIndex.stats_reset);
+        }
+        indexesTitle = `indexes (scans counted since ${since})`;
+    }
+
     const sections: [string, Record<string, unknown>[], (row: Record<string, unknown>) => string[]][] = [
         ["constraints", description.constraints, (row) => [`  ${textOf(row.name)}`, textOf(row.type), textOf(row.definition)]],
         ["referenced by", description.referencedBy, (row) => [`  ${textOf(row.from_schema)}.${textOf(row.from_table)} (${textOf(row.name)})`, textOf(row.definition)]],
-        ["indexes", description.indexes, (row) => {
+        [indexesTitle, description.indexes, (row) => {
             let size = textOf(row.size);
+            if(row.scans != null) {
+                size = `${size} · ${textOf(row.scans)} scans`;
+            }
             // A partitioned index made ON ONLY the parent stays invalid until every partition's index is attached —
             // a normal step of building it without locking; dropping it would undo that work
             if(row.valid == false && row.index_kind === "I") {

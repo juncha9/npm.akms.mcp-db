@@ -162,11 +162,15 @@ JOIN pg_namespace n ON n.oid = r.relnamespace
 WHERE c.confrelid = {oid}::oid AND c.contype = 'f' AND c.conparentid = 0
 ORDER BY n.nspname, r.relname, c.conname;`;
 
+// idx_scan counts the index's use since this database's statistics were last reset (stats_reset; null when never) —
+// the one fact behind "is this index unused?". A standby keeps its own counters, so a primary's count misses reads there.
 const INDEXES_SQL = `
 SELECT quote_ident(ic.relname) AS name, pg_get_indexdef(i.indexrelid) AS definition, pg_size_pretty(pg_relation_size(i.indexrelid)) AS size,
-       i.indisvalid AS valid, ic.relkind::text AS index_kind
+       i.indisvalid AS valid, ic.relkind::text AS index_kind, st.idx_scan AS scans,
+       (SELECT date_trunc('second', d.stats_reset)::text FROM pg_stat_database d WHERE d.datname = current_database()) AS stats_reset
 FROM pg_index i
 JOIN pg_class ic ON ic.oid = i.indexrelid
+LEFT JOIN pg_stat_all_indexes st ON st.indexrelid = i.indexrelid
 WHERE i.indrelid = {oid}::oid
 ORDER BY i.indisprimary DESC, ic.relname;`;
 
