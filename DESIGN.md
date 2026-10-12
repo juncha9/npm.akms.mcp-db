@@ -121,6 +121,10 @@ Each item below is a case where the obvious alternative produced a wrong result.
 - **A name without a schema is looked up on the session's search_path (`current_schemas(true)`), not in `public`.** A name that PostgreSQL printed without its schema in a constraint or trigger definition must resolve to the object SQL would find. As in SQL, the spelling order comes before the schema order.
 - **An unquoted name folds only A–Z,** as SQL does.
 
+### Process
+
+- **A failed stderr write stops logging for good, and shutdown has a deadline.** When the MCP client dies, nothing reads stderr any more, and the first line the server logs after that — "shutting down", on stdin's EOF — fails with EPIPE. That failure reached `uncaughtException`, whose handler logged it, which failed again; the loop starved the event loop, so `process.exit` at the end of shutdown never ran, and the server stayed behind at 100 % CPU (measured 2026-10-13: through Claude Code's `cmd /c` launch on Windows, 6.9 s of CPU in 6 s; started directly, the exit happened to win the race). With logging silenced the same server exited on its own, which is what singled out the logger. The shutdown deadline (5 s, `SHUTDOWN_DEADLINE_MS`) is for a `pool.end()` waiting on sockets through a tunnel that is already gone — not reproduced, kept as a seatbelt.
+
 ### Tunnel
 
 - **A channel adapter, `ChannelSocket` (a Duplex).** When `stream` is a function, `pg` calls it **synchronously** for each connection, immediately calls `connect(port, host)` on the result and waits for `'connect'`. ssh2's `forwardOut` is asynchronous.

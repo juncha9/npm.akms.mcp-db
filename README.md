@@ -68,7 +68,7 @@ Only entries that launch this package are listed or touched. An edit keeps every
 
 With `DB_SSH_*` set, the database host is **resolved on the SSH server** — a private name like an RDS endpoint works. Without them the connection is direct. Coming from a URL-based server, `DB_URL` takes the whole `postgres://user:password@host:port/database?sslmode=…` instead of the five split variables (not both).
 
-The server speaks MCP over **stdio**: stdout carries JSON-RPC, every log line goes to stderr.
+The server speaks MCP over **stdio**: stdout carries JSON-RPC, every log line goes to stderr. When the client goes away — stdin ends, or the process is simply gone — the server shuts down on its own and exits within a few seconds even if the database or the tunnel no longer answers; a stderr nobody reads is never a reason to stay. Its log says `mcp server ready on stdio` with its `pid`, for when one has to be found among a client's processes.
 
 ### Check it before wiring it up
 

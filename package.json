@@ -1,6 +1,6 @@
 {
     "name": "@akms/mcp-db",
-    "version": "0.1.1",
+    "version": "0.1.2",
     "description": "MCP server that lets an AI agent query one pre-registered database — directly or through an SSH tunnel — behind a parser-based guard.",
     "keywords": [
         "mcp",

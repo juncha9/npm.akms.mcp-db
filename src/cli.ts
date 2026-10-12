@@ -1,5 +1,5 @@
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { DB_ENV, LOG_LEVEL_ENV, SERVER_NAME, SERVER_VERSION } from "@/_defs";
+import { DB_ENV, LOG_LEVEL_ENV, SERVER_NAME, SERVER_VERSION, SHUTDOWN_DEADLINE_MS } from "@/_defs";
 import type { DbProfile } from "@/_types";
 import { $logger } from "@/_libs/logger";
 import { describeError } from "@/_libs/text";
@@ -166,6 +166,12 @@ async function main(): Promise<void> {
         }
         shuttingDown = true;
         _logger.info("shutting down", { signal: signal });
+        // pool.end() waits for sockets to close; through a tunnel that is already gone they may never. unref: a
+        // shutdown that finishes earlier exits through its own process.exit, not through this timer
+        setTimeout(() => {
+            _logger.warn("shutdown did not finish in time; exiting anyway", { deadline_ms: SHUTDOWN_DEADLINE_MS });
+            process.exit(0);
+        }, SHUTDOWN_DEADLINE_MS).unref();
         void instance.shutdown()
             .catch((error) => {
                 _logger.error(error, "shutdown failed");
@@ -188,10 +194,12 @@ async function main(): Promise<void> {
 
     const transport = new StdioServerTransport();
     await instance.server.connect(transport);
+    // The pid is what an operator needs to find this server among a client's processes
     _logger.info("mcp server ready on stdio", {
         server: SERVER_NAME,
         version: SERVER_VERSION,
         profile: instance.profile?.name ?? null,
+        pid: process.pid,
     });
 }
 

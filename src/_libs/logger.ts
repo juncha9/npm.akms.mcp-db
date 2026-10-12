@@ -23,6 +23,17 @@ const LEVEL_WEIGHTS: Record<LogLevel, number> = {
 
 const SECRET_META_KEYS = ["password", "passphrase", "privatekey", "privatekeypath", "secret", "token", "url"];
 
+/**
+ * Set once a write to stderr failed; every later line is dropped. When the MCP client dies, nothing
+ * reads stderr any more and the next line fails with EPIPE. Without this, that failure was logged,
+ * which failed again, and the loop starved the event loop — the server stayed behind at 100% CPU
+ * and never reached its own process.exit (measured 2026-10-13 under Claude Code's `cmd /c` launch).
+ */
+let stderrBroken = false;
+process.stderr.on("error", () => {
+    stderrBroken = true;
+});
+
 function resolveThreshold(): LogLevel {
     const configured = process.env[LOG_LEVEL_ENV];
     if(configured == null) {
@@ -36,6 +47,9 @@ function resolveThreshold(): LogLevel {
 }
 
 function write(level: Exclude<LogLevel, "silent">, message: string, meta: LogMeta): void {
+    if(stderrBroken == true) {
+        return;
+    }
     const threshold = resolveThreshold();
     if(threshold === "silent") {
         return;
@@ -57,7 +71,13 @@ function write(level: Exclude<LogLevel, "silent">, message: string, meta: LogMet
     if(Object.keys(masked).length > 0) {
         line += ` ${JSON.stringify(masked)}`;
     }
-    process.stderr.write(`${line}\n`);
+    // On POSIX a pipe write is synchronous and can throw EPIPE right here instead of emitting 'error'
+    try {
+        process.stderr.write(`${line}\n`);
+    }
+    catch {
+        stderrBroken = true;
+    }
 }
 
 function createLogger(boundMeta: LogMeta): Logger {

@@ -1,5 +1,5 @@
 export const SERVER_NAME = "akms-mcp-db";
-export const SERVER_VERSION = "0.1.1";
+export const SERVER_VERSION = "0.1.2";
 /** What `npx -y …` resolves — the `args` the `config` command writes into every entry. */
 export const PACKAGE_NAME = "@akms/mcp-db";
 
@@ -24,6 +24,8 @@ export const SSH_KEEPALIVE_INTERVAL_MS = 15000;
 export const TCP_KEEPALIVE_INITIAL_DELAY_MS = 30000;
 export const POOL_MAX_CLIENTS = 2;
 export const POOL_IDLE_TIMEOUT_MS = 60000;
+/** Shutdown waits this long for the pool and the tunnel to close, then exits anyway — a dead tunnel must not keep the process alive. */
+export const SHUTDOWN_DEADLINE_MS = 5000;
 export const APPLICATION_NAME = "akms-mcp-db";
 
 export const MAX_PORT = 65535;
