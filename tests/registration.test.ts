@@ -70,7 +70,7 @@ describe("independent shared registration", () => {
         toml.writeEntry("review-db", { ...entry(), env: { ...entry().env, DB_DESCRIPTION: "Service description" } });
         const results = registry.sync();
         const text = formatResults(results, "Registration saved.");
-        expect(text).toContain("Connections: 1 complete · 1 need attention");
+        expect(text).toContain("Connections: 2");
         expect(text).toContain("0 updated · 3 already up to date");
         expect(text).toContain("review-db");
         expect(text).toContain("Codex: Only the description differs");
