@@ -1,4 +1,5 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { Worker } from "node:worker_threads";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createDbMcpServer, type DbMcpServerInstance } from "@/server";
@@ -52,6 +53,23 @@ describe("MCP tools against PGlite", () => {
 
         const policy = await callTool("db_query", { sql: "TRUNCATE tl_parent" });
         expect(policy.text).toMatch(/^Refused by the guard: /);
+    });
+
+    it("reports parser failure without telling the caller to rewrite SQL or executing the write", async () => {
+        const posted = vi.spyOn(Worker.prototype, "postMessage").mockImplementationOnce(() => {
+            throw new Error("parser transport failed");
+        });
+        try {
+            const failed = await callTool("db_query", { sql: "INSERT INTO tl_parent VALUES (98765)" });
+            expect(failed.isError).toBe(true);
+            expect(failed.text).toMatch(/^db_query failed: SQL parser worker could not accept the request/);
+            expect(failed.text).toContain("Nothing was sent to the database.");
+            expect(failed.text).not.toContain("fix the statement");
+            const check = await instance.driver!.execute("SELECT count(*) AS n FROM tl_parent WHERE id = 98765", { transaction: "commit" });
+            expect(check.statements[0].rows[0].n).toBe("0");
+        } finally {
+            posted.mockRestore();
+        }
     });
 
     it("refuses COPY to STDOUT as unsupported and keeps serving", async () => {
@@ -158,6 +176,18 @@ describe("MCP tools against PGlite", () => {
     });
 
     describe("db_explain", () => {
+        it("shares one parser worker across query execution and EXPLAIN preflight", async () => {
+            const posted = vi.spyOn(Worker.prototype, "postMessage");
+            try {
+                expect((await callTool("db_query", { sql: "SELECT 1" })).isError).toBe(false);
+                expect((await callTool("db_explain", { sql: "SELECT 1" })).isError).toBe(false);
+                expect(posted.mock.calls.length).toBeGreaterThanOrEqual(3);
+                expect(new Set(posted.mock.contexts).size).toBe(1);
+            } finally {
+                posted.mockRestore();
+            }
+        });
+
         it("says what to send instead of an EXPLAIN-wrapped or non-explainable statement — not a syntax error, not policy", async () => {
             const wrapped = await callTool("db_explain", { sql: "EXPLAIN ANALYZE SELECT 1" });
             expect(wrapped.text).toMatch(/^Not supported by this tool: db_explain adds EXPLAIN itself/);

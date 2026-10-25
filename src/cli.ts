@@ -5,17 +5,20 @@ import { $logger } from "@/_libs/logger";
 import { describeError } from "@/_libs/text";
 import { runConfigCommand, runConnectionCheck } from "@/modules/manage";
 import { loadDbProfile } from "@/modules/profile";
-import { createDbMcpServer } from "./server";
+import { createDbCatalogServer, createDbMcpServer } from "./server";
 
 const HELP_TEXT = [
     `${SERVER_NAME} ${SERVER_VERSION} — MCP server for one database, directly or through an SSH tunnel`,
     "",
     "Usage:",
     "  akms-mcp-db [--check]",
+    "  akms-mcp-db --catalog            Load database connections from the shared registry",
     "  akms-mcp-db config [--target <client>]",
+    "  akms-mcp-db register          Register AI services for all AKMS connections",
+    "  akms-mcp-db sync              Review differences and retry pending changes",
     "",
     "Commands:",
-    "  config               Manage the databases registered in an MCP client's config —",
+    "  config               Manage the databases in the shared AKMS catalog —",
     "                       list, add, edit, remove, check, print. Asks plain questions,",
     "                       so the DB_* names below never have to be typed.",
     "",
@@ -23,7 +26,7 @@ const HELP_TEXT = [
     "      --check          Connect (SSH first, then the database), report each step, and exit.",
     "                       Prints the SSH host key fingerprint so it can be pinned.",
     "      --target <id>    config: claude-code | codex | claude-desktop | cursor",
-    "                       (default: the first one installed)",
+    "                       (preselects a service in Register; saves apply to all registered services)",
     "  -v, --version        Print the version and exit",
     "  -h, --help           Print this help and exit",
     "",
@@ -46,29 +49,34 @@ const HELP_TEXT = [
     `  ${LOG_LEVEL_ENV}     silent | debug | info | warn | error  (default info, written to stderr)`,
     "",
     "The server speaks MCP over stdio; run it from an MCP client, not interactively.",
+    "Catalog: ~/.akms/mcp/registry.json (or $AKMS_MCP_HOME/registry.json) stores settings and passwords in plaintext.",
 ].join("\n");
 
 interface CliArguments {
     showHelp: boolean;
     showVersion: boolean;
     checkOnly: boolean;
+    catalogMode: boolean;
     /** `config` as the first argument opens the database manager instead of the server. */
     configMode: boolean;
+    managementMode?: "config" | "register" | "sync";
     /** `--target <id>` — the client `config` opens on. */
     targetId?: string;
 }
 
 function parseArguments(argv: string[]): CliArguments {
-    const parsed: CliArguments = { showHelp: false, showVersion: false, checkOnly: false, configMode: false };
+    const parsed: CliArguments = { showHelp: false, showVersion: false, checkOnly: false, configMode: false, catalogMode: false };
 
     let rest = argv;
-    if(argv[0] === "config") {
+    if(["config", "register", "sync"].includes(argv[0])) {
         parsed.configMode = true;
+        parsed.managementMode = argv[0] as "config" | "register" | "sync";
         rest = argv.slice(1);
     }
 
     for(let index = 0; index < rest.length; index += 1) {
         const argument = rest[index];
+        if(argument === "--catalog") { parsed.catalogMode = true; continue; }
         if(argument === "--target") {
             parsed.targetId = rest[index + 1];
             index += 1;
@@ -91,6 +99,7 @@ function parseArguments(argv: string[]): CliArguments {
             continue;
         }
     }
+    if(parsed.catalogMode && (parsed.checkOnly || parsed.configMode || parsed.targetId !== undefined)) throw new Error("--catalog cannot be combined with --check, management commands or --target.");
     return parsed;
 }
 
@@ -134,6 +143,7 @@ async function main(): Promise<void> {
             input: process.stdin,
             output: process.stdout,
             targetId: cliArguments.targetId,
+            mode: cliArguments.managementMode,
         });
         process.exit(exitCode);
     }
@@ -146,13 +156,13 @@ async function main(): Promise<void> {
         process.exit(exitCode);
     }
 
-    const instance = createDbMcpServer();
+    const instance = cliArguments.catalogMode ? createDbCatalogServer() : createDbMcpServer();
 
     // Last line of defense for a failure no handler owns: an MCP client does not restart a dead
     // server, and pg-pool already discards a connection that errored, so staying up is the safer state
     process.on("uncaughtException", (error) => {
         // Thrown inside pg's message parser, it leaves a connection stopped mid-protocol — its call would never answer
-        const cutConnections = instance.driver?.abortActiveConnections(error) ?? 0;
+        const cutConnections = instance.abortActiveConnections?.(error) ?? instance.driver?.abortActiveConnections(error) ?? 0;
         _logger.error(error, "uncaught exception; the server keeps running", { cut_connections: cutConnections });
     });
     process.on("unhandledRejection", (reason) => {
@@ -200,6 +210,7 @@ async function main(): Promise<void> {
         version: SERVER_VERSION,
         profile: instance.profile?.name ?? null,
         pid: process.pid,
+        ...("connectionCount" in instance ? { connections: instance.connectionCount } : {}),
     });
 }
 

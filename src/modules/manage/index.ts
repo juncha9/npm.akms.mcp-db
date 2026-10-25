@@ -1,9 +1,13 @@
+import type { Registry } from "../registration/registry";
+import { ManagedSession } from "../registration/menu";
+import type { ManagementMode } from "../registration/menu";
 import type { Readable, Writable } from "node:stream";
-import { DB_ENV } from "@/_defs";
+import { DB_ENV, SERVER_VERSION } from "@/_defs";
 import type { ConfigTarget, ConfigWriteResult, DbSetupAnswers, McpServerEntry } from "@/_types";
 import { describeError } from "@/_libs/text";
 import { profileFromEnv, runConnectionCheck } from "./connection-check";
 import { runDbForm } from "./db-form";
+import { copyEntryToClient } from "./copy-entry";
 import { answersToEntry, entryToAnswers, isOurEntry, summarizeEntry } from "./entry";
 import { PromptBackError, PromptClosedError, Prompter, displayWidth } from "./prompter";
 import type { SelectItem } from "./prompter";
@@ -30,6 +34,9 @@ export interface ConfigCommandOptions {
     targets?: ConfigTarget[];
     /** Client to open on; defaults to the first detected one. */
     targetId?: string;
+    registryPath?: string;
+    mode?: ManagementMode;
+    runtimeOptions?: Registry["runtimeOptions"]; management?: ManagedSession;
 }
 
 function maskSecrets(entry: McpServerEntry): McpServerEntry {
@@ -59,6 +66,7 @@ function indent(text: string): string {
 }
 
 function reportWrite(prompter: Prompter, result: ConfigWriteResult, action: string): void {
+    prompter.clearScreen();
     if(result.status === "written") {
         prompter.write(`  ${prompter.paint.success(action)} ${prompter.paint.dim(result.detail)}\n`);
         prompter.write(prompter.paint.dim("  Restart the client (or reconnect it from its MCP menu) to pick up the change.\n\n"));
@@ -79,6 +87,7 @@ async function addOrEditDatabase(
     target: ConfigTarget,
     entries: Record<string, McpServerEntry>,
     existingName?: string,
+    management?: ManagedSession,
 ): Promise<void> {
     let title = "New database";
     let draft: DbSetupAnswers | undefined;
@@ -97,16 +106,19 @@ async function addOrEditDatabase(
         });
         if(answers == null) {
             output.write("  Cancelled — nothing was written.\n\n");
+            await prompter.acknowledge();
             return;
         }
 
-        const entry = answersToEntry(answers);
+        let entry = answersToEntry(answers);
+        entry = target.prepareEntry?.(answers.name, entry, existingName) ?? entry;
+        prompter.clearScreen();
         output.write(`\n  ${prompter.paint.dim(`This goes into ${target.location}:`)}\n\n`);
         output.write(`${indent(formatForTarget(target, answers.name, maskSecrets(entry)))}\n\n`);
 
         let confirmed: boolean;
         try {
-            confirmed = await prompter.askYesNo("Write it?", true);
+            confirmed = await prompter.askYesNo(target.id === "registered" ? "Save and apply to all registered services?" : "Write it?", true);
         }
         catch(ex) {
             if(ex instanceof PromptBackError == false) {
@@ -118,18 +130,21 @@ async function addOrEditDatabase(
 
         if(confirmed == false) {
             output.write("  Not written. Pick the database and choose Print to get the entry ready to paste.\n\n");
+            await prompter.acknowledge();
             return;
         }
 
-        const written = target.writeEntry(answers.name, entry);
+        const written = (existingName && existingName !== answers.name && target.renameEntry ? target.renameEntry(existingName, answers.name, entry) : target.writeEntry(answers.name, entry));
         reportWrite(prompter, written, "Written");
 
-        if(written.status === "written" && existingName != null && existingName !== answers.name) {
+        if(written.status === "written" && existingName != null && existingName !== answers.name && !target.renameEntry) {
             const removed = target.removeEntry(existingName);
             if(removed.status === "unavailable") {
                 output.write(`  The old name ${existingName} is still there: ${removed.detail}\n\n`);
             }
         }
+        if(written.status === "written") await management?.checkSaved(prompter, answers.name, existingName ? entries[existingName] : undefined);
+        await prompter.acknowledge();
         return;
     }
 }
@@ -141,16 +156,19 @@ async function checkDatabase(
     target: ConfigTarget,
     name: string,
     entry: McpServerEntry,
+    management?: ManagedSession,
 ): Promise<void> {
     output.write("\n");
     const profile = profileFromEnv(output, entry.env);
     if(profile == null) {
         output.write("\n");
+        await prompter.pause();
         return;
     }
 
     const result = await runConnectionCheck(profile, output);
     output.write("\n");
+    await prompter.pause();
 
     if(result.connected == false) {
         return;
@@ -160,8 +178,10 @@ async function checkDatabase(
         const pin = await prompter.askYesNo("Pin this SSH host key?", true);
         if(pin == true) {
             const env = { ...entry.env, [DB_ENV.SSH_HOST_KEY]: result.hostKeyFingerprint };
+            if(management && !await management.prepareRuntime(prompter, entry)) return;
             const written = target.writeEntry(name, { ...entry, env: env });
             reportWrite(prompter, written, "Pinned");
+            await prompter.acknowledge();
         }
     }
 }
@@ -206,8 +226,10 @@ async function manageDatabase(
     prompter: Prompter,
     output: Writable,
     target: ConfigTarget,
+    targets: ConfigTarget[],
     entries: Record<string, McpServerEntry>,
     name: string,
+    management?: ManagedSession,
 ): Promise<void> {
     for(;;) {
         const action = await prompter.select(
@@ -216,6 +238,9 @@ async function manageDatabase(
                 { value: "edit", key: "e", label: "Edit", hint: "open its settings" },
                 { value: "check", key: "c", label: "Check the connection", hint: "connect now and offer to pin the SSH host key" },
                 { value: "print", key: "p", label: "Print the entry", hint: "JSON, Codex TOML and a claude command, ready to paste" },
+                ...targets.some((candidate) => candidate.id !== target.id)
+                    ? [{ value: "copy", key: "o", label: "Copy to another client", hint: "keep this entry and copy its settings" }]
+                    : [],
                 { value: "remove", key: "r", label: "Remove", hint: `from ${target.label}` },
                 { separator: true },
                 { value: "back", key: "b", label: "Back" },
@@ -224,18 +249,28 @@ async function manageDatabase(
         );
 
         try {
+            prompter.clearScreen();
+
             if(action === "edit") {
-                await addOrEditDatabase(prompter, output, target, entries, name);
+                if(management && !await management.prepareRuntime(prompter, entries[name])) return;
+                await addOrEditDatabase(prompter, output, target, entries, name, management);
                 return;
             }
 
             if(action === "check") {
-                await checkDatabase(prompter, output, target, name, entries[name]);
+                await checkDatabase(prompter, output, target, name, entries[name], management);
                 return;
             }
 
             if(action === "print") {
                 printDatabase(prompter, name, entries[name]);
+                await prompter.acknowledge();
+                return;
+            }
+
+            if(action === "copy") {
+                await copyEntryToClient(prompter, target, targets, name, entries[name]);
+                await prompter.acknowledge();
                 return;
             }
 
@@ -243,6 +278,7 @@ async function manageDatabase(
                 const remove = await prompter.askYesNo(`Remove ${name} from ${target.location}?`, false);
                 if(remove == true) {
                     reportWrite(prompter, target.removeEntry(name), "Removed");
+                    await prompter.acknowledge();
                 }
             }
             return;
@@ -257,12 +293,12 @@ async function manageDatabase(
 
 /**
  * `akms-mcp-db config` — an interactive manager for the databases registered in an MCP
- * client's config. The databases themselves are the menu: pick one to edit, check, print or
+ * client's config. The databases themselves are the menu: pick one to edit, check, copy, print or
  * remove it, or pick an action below them. The `DB_*` names never have to be typed.
  *
  * @returns Process exit code.
  */
-export async function runConfigCommand(options: ConfigCommandOptions): Promise<number> {
+export async function runTargetConfigCommand(options: ConfigCommandOptions): Promise<number> {
     const { input, output } = options;
     const targets = options.targets ?? listConfigTargets();
 
@@ -280,6 +316,7 @@ export async function runConfigCommand(options: ConfigCommandOptions): Promise<n
     const paint = prompter.paint;
 
     try {
+        if(options.management && !await options.management.initialize(prompter)) return 0;
         for(;;) {
             let entries: Record<string, McpServerEntry> = {};
             let names: string[] = [];
@@ -294,7 +331,11 @@ export async function runConfigCommand(options: ConfigCommandOptions): Promise<n
             }
 
             // (1) Where we are
-            output.write(`\n${paint.bold(target.label)}  ${paint.dim(target.location)}\n`);
+            prompter.clearScreen();
+            if(options.management) {
+                output.write(paint.bold("Database connections") + "\n");
+                options.management.writeStatus(prompter);
+            } else output.write(`\n${paint.bold(target.label)}  ${paint.dim(target.location)}\n`);
             if(readError != null) {
                 output.write(`  Cannot read it: ${readError}\n  Fix the file by hand, or switch to another client.\n`);
             }
@@ -325,6 +366,7 @@ export async function runConfigCommand(options: ConfigCommandOptions): Promise<n
                 }
                 items.push({ value: "switch", key: "t", label: "Switch client", hint: switchHint });
             }
+            if(options.management) { options.management.decorate(items); items.push(...options.management.items()); }
             items.push({ value: "quit", key: "q", label: "Quit" });
 
             let question = "No databases here yet";
@@ -346,6 +388,9 @@ export async function runConfigCommand(options: ConfigCommandOptions): Promise<n
                 return 0;
             }
 
+            prompter.clearScreen();
+            if(options.management && await options.management.handle(picked, prompter)) continue;
+
             if(picked === "switch") {
                 const switched = await prompter.select(
                     "Which client?",
@@ -365,12 +410,12 @@ export async function runConfigCommand(options: ConfigCommandOptions): Promise<n
             // (3) Act — a failure is reported and the menu comes back, rather than exiting
             try {
                 if(picked === "add") {
-                    await addOrEditDatabase(prompter, output, target, entries);
+                    await addOrEditDatabase(prompter, output, target, entries, undefined, options.management);
                     continue;
                 }
 
                 if(picked.startsWith(DATABASE_VALUE_PREFIX) == true) {
-                    await manageDatabase(prompter, output, target, entries, picked.slice(DATABASE_VALUE_PREFIX.length));
+                    await manageDatabase(prompter, output, target, targets, entries, picked.slice(DATABASE_VALUE_PREFIX.length), options.management);
                 }
             }
             catch(ex) {
@@ -382,6 +427,7 @@ export async function runConfigCommand(options: ConfigCommandOptions): Promise<n
                     continue;
                 }
                 output.write(`  Failed: ${describeError(ex)}\n\n`);
+                await prompter.acknowledge();
             }
         }
     }
@@ -396,4 +442,10 @@ export async function runConfigCommand(options: ConfigCommandOptions): Promise<n
     finally {
         prompter.close();
     }
+}
+
+/** Independent registration and shared connection management; never invokes @akms/mcp. */
+export async function runConfigCommand(options: ConfigCommandOptions): Promise<number> {
+    const management = new ManagedSession({ kind: "db", version: SERVER_VERSION, targets: options.targets ?? listConfigTargets(), registryPath: options.registryPath, mode: options.mode, targetId: options.targetId, runtimeOptions: options.runtimeOptions });
+    return runTargetConfigCommand({ ...options, targets: [management.target], targetId: undefined, management });
 }

@@ -1,6 +1,6 @@
 {
     "name": "@akms/mcp-db",
-    "version": "0.1.2",
+    "version": "0.2.1",
     "description": "MCP server that lets an AI agent query one pre-registered database — directly or through an SSH tunnel — behind a parser-based guard.",
     "keywords": [
         "mcp",
@@ -41,6 +41,7 @@
     "files": [
         "lib",
         "README.md",
+        "CHANGELOG.md",
         "LICENSE.md"
     ],
     "engines": {
@@ -50,6 +51,7 @@
         "access": "public"
     },
     "scripts": {
+        "prepublishOnly": "node scripts/release-guard.mjs",
         "build": "tsc --noEmit && rimraf ./lib && tsup",
         "watch": "tsc --noEmit && tsup --watch",
         "dev": "tsx ./src/cli.ts",
@@ -63,6 +65,7 @@
         "libpg-query": "^18.1.5",
         "pg": "^8.23.0",
         "pg-cursor": "^2.22.0",
+        "smol-toml": "1.9.1",
         "ssh2": "^1.17.0",
         "zod": "^4.6.5"
     },

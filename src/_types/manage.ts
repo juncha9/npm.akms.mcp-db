@@ -43,7 +43,7 @@ export interface DbSetupAnswers {
     extraEnv: Record<string, string>;
 }
 
-export type ConfigTargetId = "claude-code" | "claude-desktop" | "codex" | "cursor";
+export type ConfigTargetId = "claude-code" | "claude-desktop" | "codex" | "cursor" | "registered";
 
 export interface ConfigWriteResult {
     status: "written" | "unavailable";
@@ -65,7 +65,12 @@ export interface ConfigTarget {
      *
      * @throws {Error} If the file exists but cannot be parsed.
      */
+    prepareEntry?(name: string, entry: McpServerEntry, oldName?: string): McpServerEntry;
     readEntries(): Record<string, McpServerEntry>;
-    writeEntry(name: string, entry: McpServerEntry): ConfigWriteResult;
+    /** Includes names whose entries are not supported by readEntries(), such as HTTP servers. */
+    hasEntry?(name: string): boolean;
+    /** replace discards destination-specific entry options when copying between clients. */
+    writeEntry(name: string, entry: McpServerEntry, options?: { replace?: boolean }): ConfigWriteResult;
     removeEntry(name: string): ConfigWriteResult;
+    renameEntry?(oldName: string, name: string, entry: McpServerEntry): ConfigWriteResult;
 }

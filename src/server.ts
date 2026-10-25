@@ -6,6 +6,7 @@ import { $logger } from "@/_libs/logger";
 import { PostgresDriver } from "@/modules/postgres/postgres-driver";
 import { loadDbProfile } from "@/modules/profile";
 import { registerAllTools } from "@/modules/tools/register-tools";
+import { createCatalogServer } from "./modules/session-server";
 
 export const SERVER_INSTRUCTIONS = [
     "This server runs SQL against one PostgreSQL database — directly or through an SSH tunnel, as configured in this server's own environment.",
@@ -28,6 +29,7 @@ export interface DbMcpServerInstance {
     server: McpServer;
     profile: DbProfile | null;
     driver: PostgresDriver | null;
+    abortActiveConnections?(error: Error): number;
     shutdown(): Promise<void>;
 }
 
@@ -56,4 +58,27 @@ export function createDbMcpServer(env: EnvSource = process.env): DbMcpServerInst
             await driver?.close();
         },
     };
+}
+
+/** Each catalog connection retains its own driver and SQL policy. */
+export function createDbCatalogServer(file?: string) {
+    const logger = $logger.child({ context: "createDbCatalogServer" });
+    const instance = createCatalogServer<{ profile: DbProfile; driver: PostgresDriver }>({
+        kind: "db", identity: { name: SERVER_NAME, version: SERVER_VERSION }, file,
+        instructions: SERVER_INSTRUCTIONS.split("\n").slice(3).join("\n"),
+        create(env) {
+            const profile = loadDbProfile(env);
+            if(!profile) throw new Error("No database is configured for this catalog connection.");
+            const driver = new PostgresDriver(profile);
+            return {
+                value: { profile, driver },
+                summary: { description: profile.description, host: profile.host, port: profile.port, database: profile.database, readonly: profile.policy.readonly },
+                shutdown: () => driver.close(),
+            };
+        },
+        register: registerAllTools,
+        warn: (name, reason) => logger.warn("catalog connection skipped", { name, reason }),
+    });
+    return { ...instance, driver: null, abortActiveConnections: (error: Error) =>
+        instance.contexts.reduce((count, context) => count + (context.driver?.abortActiveConnections(error) ?? 0), 0) };
 }

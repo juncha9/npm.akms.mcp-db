@@ -1,5 +1,9 @@
 # @akms/mcp-db — Design record
 
+## Shared registration (current management flow)
+
+Standalone registration, the shared catalog, reconciliation and package independence are specified in [registration design](docs/design/registration.md). This supersedes client-specific connection lists in the earlier setup flow.
+
 > Why the server is built the way it is. Usage and behavior are documented in [README.md](README.md) and not repeated here. The pre-implementation design and the round-by-round log of the 2026-10-11 review (rounds 1–8) are in this file as of commit `18994aa`, in Korean.
 
 ## 1. Why
@@ -150,6 +154,22 @@ Each item below is a case where the obvious alternative produced a wrong result.
 | **`libpg-query`** (libpg_query compiled to WASM) | 18.1.5 · 1.8 MB · no install script | **0 / 29** | — |
 
 "A native binding, heavy to install" was outdated information: it is WASM now. Meanwhile, in a guard where a parse failure means refusal, failing 9 of 29 would block everyday work.
+
+### Idle allocation (2026-10-19)
+
+`libpg-query` 18.1.5 initializes WASM as soon as it is imported, allocating 128 MiB before any SQL is parsed. Version 0.1.5 deferred that import until the first non-empty parse and loaded `ssh2` only when opening a tunnel. This reduced startup allocation but kept parser memory after use.
+
+A local Windows comparison of fresh built CLI processes, after MCP initialization and tool listing without storage access, measured Private Bytes at about 200 MiB before and 49 MiB after the 0.1.5 changes. RSS decreased from about 86 MiB to 79 MiB; private allocation and resident memory are different measurements. These figures exclude the npm parent process and are one local sample, not a fixed runtime budget.
+
+Version 0.1.6 moves the parser into a worker. Each driver owns one lazy worker, reuses it across concurrent requests, and terminates it after all pending parses finish and 30 seconds pass without another request. A request arriving during retirement waits for exit before allocating a replacement. Database queries can continue after their AST has been returned; parser retirement does not close their connections. The library's standalone `parseStatements` function uses its own shared worker with the same idle policy.
+
+`db_explain` uses the driver's parser for both the original statement's preflight and its generated EXPLAIN statement. It must not use the standalone function, which would allocate a second worker in the same server.
+
+A local Windows/Node 24.19.0 sample of the built 0.1.6 library with a configured MCP server measured 46.58 MiB Private Bytes / 77.21 MiB RSS before parsing, 202.14 / 99.63 MiB after use, and 37.83 / 73.73 MiB after 32 seconds idle. This exercised the driver's parser and guard with SQL refused before database access; it excludes database/network work and npm wrappers. Cold parsing took 39.1 ms, a warm repeat 0.2 ms, and the first parse after retirement 41.1 ms. These are one local sample, not a fixed memory or latency guarantee; garbage collection also affects the idle baseline.
+
+The worker receives SQL and an absolute parser-module path, with no inherited application preloads or environment credentials. Only AST data and SQL error details return to the main isolate. Worker failure rejects pending parses; it never causes unparsed SQL to execute. Shutdown closes the driver's worker without affecting other drivers. Idle workers and timers are unreferenced so they cannot keep a library caller alive. Worker termination releases its WASM allocation, while Node's remaining allocator/heap memory can keep total RSS above the original startup value. The next parse incurs cold initialization again. SSH runtime unloading remains outside this change.
+
+The 0.1.7 review separates infrastructure failures from SQL syntax errors: a failed worker cannot cause a client to be instructed to rewrite valid SQL. No SQL request is replayed automatically. Regression tests hold worker retirement open while new requests arrive or shutdown begins. PGlite tests hold a write's result inside an active transaction, advance the parser's idle clock, and verify that worker termination preserves the connection, result, commit and rollback. These are controlled lifecycle tests; real PostgreSQL integration coverage still requires `MCP_DB_TEST_URL`.
 
 ## 6. Testing
 

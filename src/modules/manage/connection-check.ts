@@ -4,6 +4,7 @@ import type { DbProfile } from "@/_types";
 import { describeError } from "@/_libs/text";
 import { PostgresDriver, type CheckReport } from "@/modules/postgres/postgres-driver";
 import { loadDbProfile } from "@/modules/profile";
+import { CheckProgress } from "./check-progress";
 
 export interface ConnectionCheckResult {
     /** True when every hop — the SSH tunnel when there is one, then the database — answered. */
@@ -45,11 +46,17 @@ export async function runConnectionCheck(profile: DbProfile, output: Writable): 
     output.write(`Checking ${profile.name}  →  ${profile.driver} ${profile.user}@${profile.host}:${profile.port}/${profile.database} ${route}\n\n`);
 
     const driver = new PostgresDriver(profile);
+    const progress = new CheckProgress(output);
+    let connected = false;
     let report: CheckReport;
     try {
-        report = await driver.check();
+        report = await driver.check((stage) => {
+            progress.start(stage === "ssh" ? "SSH tunnel connection" : "Database connection and response");
+        });
+        connected = report.ssh?.ok !== false && report.database?.ok === true;
     }
     finally {
+        progress.finish(connected);
         await driver.close();
     }
 

@@ -1,11 +1,11 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { connectionTools } from "../session-server";
 import { z } from "zod";
 import { CATALOG_MAX_ROWS, DB_ENV } from "@/_defs";
 import type { DbProfile, DbSummary, ExecuteResult } from "@/_types";
 import { $logger } from "@/_libs/logger";
 import { describeError, truncateOutput } from "@/_libs/text";
 import { formatGuardRejection, GuardRejectionError } from "@/modules/guard/guard-error";
-import { parseStatements } from "@/modules/guard/parse";
 import { checkStatements } from "@/modules/guard/rules";
 import { describeRelation, findSchemas, listRelations, listSchemas, readSearchPath } from "@/modules/postgres/catalog";
 import { CallCancelledError, CommitError, type PostgresDriver, StatementError } from "@/modules/postgres/postgres-driver";
@@ -455,7 +455,8 @@ function sqlSpelling(name: string): string {
     return `"${name.replaceAll("\"", "\"\"")}"`;
 }
 
-export function registerAllTools(server: McpServer, context: ToolContext): void {
+export function registerAllTools(server: McpServer, context: ToolContext, connection?: string): void {
+    server = connectionTools(server, connection);
     const readonlyProfile = context.profile?.policy.readonly == true;
 
     server.registerTool(
@@ -630,7 +631,7 @@ export function registerAllTools(server: McpServer, context: ToolContext): void 
         async (args, extra) => {
             try {
                 const driver = requireDriver(context);
-                const statements = await parseStatements(args.sql);
+                const statements = await driver.parse(args.sql);
                 if(statements.length > 1) {
                     return errorResult(context, `db_explain takes a single statement; this has ${statements.length}.`);
                 }

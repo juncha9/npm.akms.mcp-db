@@ -1,13 +1,10 @@
 import fs from "node:fs";
 import { createHash } from "node:crypto";
 import type { Duplex } from "node:stream";
-import ssh2 from "ssh2";
-import type { ConnectConfig } from "ssh2";
+import type { Client, ConnectConfig } from "ssh2";
 import { SSH_KEEPALIVE_INTERVAL_MS } from "@/_defs";
 import type { SshTunnelProfile } from "@/_types";
 import { $logger } from "@/_libs/logger";
-
-const { Client } = ssh2;
 
 const WINDOWS_AGENT_PIPE = "\\\\.\\pipe\\openssh-ssh-agent";
 
@@ -27,8 +24,8 @@ export function toHostKeyFingerprint(hostKey: Buffer): string {
 export class SshTunnel {
     readonly profile: SshTunnelProfile;
     private readonly connectTimeoutMs: number;
-    private client: InstanceType<typeof Client> | null = null;
-    private connecting: Promise<InstanceType<typeof Client>> | null = null;
+    private client: Client | null = null;
+    private connecting: Promise<Client> | null = null;
     private observedFingerprint: string | null = null;
     private closed = false;
 
@@ -65,7 +62,7 @@ export class SshTunnel {
     }
 
     /** Connects, or joins the attempt already in flight. */
-    async connect(): Promise<InstanceType<typeof Client>> {
+    async connect(): Promise<Client> {
         if(this.closed == true) {
             throw new Error("ssh tunnel is closed");
         }
@@ -77,35 +74,42 @@ export class SshTunnel {
         }
 
         const _logger = $logger.child({ context: "SshTunnel", ssh: this.endpoint });
-        const config = this.buildConnectConfig();
-        const attempt = new Promise<InstanceType<typeof Client>>((resolve, reject) => {
-            const client = new Client();
-            client.on("ready", () => {
-                // close() ran while the handshake was in flight; keeping this client would leak the connection
-                if(this.closed == true) {
-                    client.end();
-                    reject(new Error("ssh tunnel is closed"));
-                    return;
-                }
-                _logger.info("ssh tunnel connected");
-                this.client = client;
-                resolve(client);
+        const attempt = (async () => {
+            // Direct PostgreSQL connections never need ssh2 or its crypto runtime.
+            const { default: { Client } } = await import("ssh2");
+            if(this.closed == true) {
+                throw new Error("ssh tunnel is closed");
+            }
+            const config = this.buildConnectConfig();
+            return await new Promise<Client>((resolve, reject) => {
+                const client = new Client();
+                client.on("ready", () => {
+                    // close() ran while the handshake was in flight; keeping this client would leak the connection
+                    if(this.closed == true) {
+                        client.end();
+                        reject(new Error("ssh tunnel is closed"));
+                        return;
+                    }
+                    _logger.info("ssh tunnel connected");
+                    this.client = client;
+                    resolve(client);
+                });
+                client.on("error", (error: Error) => {
+                    _logger.error(error, "ssh tunnel error");
+                    if(this.client === client) {
+                        this.client = null;
+                    }
+                    reject(error);
+                });
+                client.on("close", () => {
+                    if(this.client === client) {
+                        _logger.warn("ssh tunnel closed; the next query reconnects");
+                        this.client = null;
+                    }
+                });
+                client.connect(config);
             });
-            client.on("error", (error: Error) => {
-                _logger.error(error, "ssh tunnel error");
-                if(this.client === client) {
-                    this.client = null;
-                }
-                reject(error);
-            });
-            client.on("close", () => {
-                if(this.client === client) {
-                    _logger.warn("ssh tunnel closed; the next query reconnects");
-                    this.client = null;
-                }
-            });
-            client.connect(config);
-        });
+        })();
         this.connecting = attempt;
         try {
             return await attempt;

@@ -1,4 +1,4 @@
-export { createDbMcpServer, SERVER_INSTRUCTIONS } from "./server";
+export { createDbMcpServer, createDbCatalogServer, SERVER_INSTRUCTIONS } from "./server";
 export type { DbMcpServerInstance } from "./server";
 export { loadDbProfile, toDbSummary } from "./modules/profile";
 export { PostgresDriver, StatementError, CommitError, CallCancelledError } from "./modules/postgres/postgres-driver";

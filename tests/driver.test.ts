@@ -1,7 +1,9 @@
 import type pg from "pg";
+import { Worker } from "node:worker_threads";
 import Cursor from "pg-cursor";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { GuardRejectionError } from "@/modules/guard/guard-error";
+import { PARSER_IDLE_TIMEOUT_MS } from "@/modules/guard/sql-parser";
 import { loadDbProfile } from "@/modules/profile";
 import { CallCancelledError, CommitError, PostgresDriver, StatementError } from "@/modules/postgres/postgres-driver";
 import { startPgliteServer, type PgliteServer } from "./support/pglite-server";
@@ -49,6 +51,58 @@ describe("PostgresDriver against PGlite", () => {
         const result = await driver.execute(`SELECT count(*) AS n FROM ${table}`, { transaction: "commit" });
         return String(result.statements[0].rows[0].n);
     }
+
+    it.each(["commit", "rollback"] as const)("parser retirement preserves an active %s transaction and its connection", async (transaction) => {
+        const isolated = new PostgresDriver(loadDbProfile({ DB_DRIVER: "postgres", DB_URL: database.url, DB_SSL: "off" })!);
+        await isolated.execute("CREATE TABLE IF NOT EXISTS drv_parser_idle (id int)", { transaction: "commit" });
+        const pool = (isolated as unknown as { pool: pg.Pool }).pool;
+        const cursorPrototype = Cursor.prototype as unknown as { read: (...args: unknown[]) => Promise<unknown> };
+        const originalRead = cursorPrototype.read;
+        let release!: () => void;
+        let markReached!: () => void;
+        const gate = new Promise<void>(resolve => { release = resolve; });
+        const reached = new Promise<void>(resolve => { markReached = resolve; });
+        let held = false;
+        const read = vi.spyOn(cursorPrototype, "read").mockImplementation(async function(this: unknown, ...args) {
+            const rows = await originalRead.apply(this, args);
+            if(!held) {
+                held = true;
+                markReached();
+                await gate; // The write ran, but the driver is still inside its transaction.
+            }
+            return rows;
+        });
+        const stopped = vi.spyOn(Worker.prototype, "terminate");
+        let outcome: ReturnType<PostgresDriver["execute"]> | undefined;
+        try {
+            vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+            outcome = isolated.execute(`INSERT INTO drv_parser_idle VALUES (${transaction === "commit" ? 1 : 2}) RETURNING id`, { transaction });
+            await Promise.race([reached, outcome.then(() => { throw new Error("query did not reach its held result"); })]);
+            expect(pool.totalCount).toBe(1);
+            expect(pool.idleCount).toBe(0);
+            vi.advanceTimersByTime(PARSER_IDLE_TIMEOUT_MS);
+            expect(stopped).toHaveBeenCalledTimes(1);
+            await stopped.mock.results[0].value;
+            expect(pool.totalCount).toBe(1);
+            expect(pool.idleCount).toBe(0);
+            release();
+            const result = await outcome;
+            expect(result.transaction).toBe(transaction);
+            expect(result.statements[0].rowCount).toBe(1);
+            expect(result.statements[0].rows).toEqual([{ id: transaction === "commit" ? 1 : 2 }]);
+            const stored = await isolated.execute(`SELECT count(*) AS n FROM drv_parser_idle WHERE id = ${transaction === "commit" ? 1 : 2}`, { transaction: "commit" });
+            expect(stored.statements[0].rows[0].n).toBe(transaction === "commit" ? "1" : "0");
+            expect(pool.totalCount).toBe(1);
+            await isolated.execute("DELETE FROM drv_parser_idle WHERE id > 0", { transaction: "commit" });
+        } finally {
+            release();
+            await outcome?.catch(() => undefined);
+            read.mockRestore();
+            stopped.mockRestore();
+            await isolated.close();
+            vi.useRealTimers();
+        }
+    });
 
     describe("a connection lost mid-call", () => {
         it("fails that call instead of the process, and the next call gets a fresh connection", async () => {

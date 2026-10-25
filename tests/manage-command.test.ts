@@ -6,9 +6,10 @@ import os from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
 import ssh2 from "ssh2";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ConfigTarget, McpServerEntry } from "@/_types";
-import { runConfigCommand } from "@/modules/manage";
+import { runTargetConfigCommand as runConfigCommand } from "@/modules/manage";
+import { profileFromEnv, runConnectionCheck } from "@/modules/manage/connection-check";
 import { createJsonFileTarget } from "@/modules/manage/targets/json-file";
 import { toHostKeyFingerprint } from "@/modules/tunnel/ssh-tunnel";
 import { startPgliteServer, type PgliteServer } from "./support/pglite-server";
@@ -105,6 +106,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+    vi.unstubAllEnvs();
     fs.rmSync(workDirectory, { recursive: true, force: true });
 });
 
@@ -142,6 +144,33 @@ const DIRECT_ENV = {
     DB_USER: "postgres",
     DB_SSL: "off",
 };
+
+describe("animated database checks", () => {
+    it.each([true, false])("advances past SSH only if the tunnel succeeds (%s)", async (tunnelWorks) => {
+        vi.stubEnv("TERM", "xterm");
+        const output = Object.assign(new PassThrough(), { isTTY: true, columns: 80 });
+        let screen = "";
+        output.on("data", (chunk: Buffer) => { screen += chunk.toString(); });
+        const profile = profileFromEnv(output, {
+            ...DIRECT_ENV,
+            DB_PORT: String(database.port),
+            DB_SSH_HOST: "127.0.0.1",
+            DB_SSH_PORT: String(tunnelWorks ? sshPort : closedPort),
+            DB_SSH_USER: "tester",
+            DB_SSH_PASSWORD: "test-password",
+        });
+
+        expect(profile).not.toBeNull();
+        const result = await runConnectionCheck(profile!, output);
+        expect(result.connected).toBe(tunnelWorks);
+        expect(screen).toContain("SSH tunnel connection");
+        expect(screen.includes("Database connection and response")).toBe(tunnelWorks);
+        expect(screen).toContain(tunnelWorks ? "OK      db" : "FAILED  ssh");
+        const completed = screen;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        expect(screen).toBe(completed);
+    });
+});
 
 describe("config — adding a database", () => {
     it("fills the settings form, checks the connection and writes the entry", async () => {

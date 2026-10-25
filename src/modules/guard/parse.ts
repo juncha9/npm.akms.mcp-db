@@ -1,16 +1,12 @@
-import { parse } from "libpg-query";
 import type { ParsedStatement } from "@/_types";
 import { describeError } from "@/_libs/text";
 import { GuardRejectionError } from "./guard-error";
+import { SqlParser, SqlParserUnavailableError, type RawStatement } from "./sql-parser";
 
 // The real PostgreSQL grammar (libpg_query, compiled to WASM) — the same parser postgres-mcp
 // uses through pglast. A statement it cannot parse is refused: an unknown shape can't be screened.
 
-interface RawStatement {
-    stmt: Record<string, Record<string, unknown>>;
-    stmt_location?: number;
-    stmt_len?: number;
-}
+const sharedParser = new SqlParser();
 
 /**
  * Splits `sql` into statements with their own source text.
@@ -18,16 +14,21 @@ interface RawStatement {
  * @throws {GuardRejectionError} When the text is empty, only comments, or does not parse.
  */
 export async function parseStatements(sql: string): Promise<ParsedStatement[]> {
+    return parseStatementsWithParser(sql, sharedParser);
+}
+
+/** Drivers own their parser so shutdown cannot interrupt another driver's work. */
+export async function parseStatementsWithParser(sql: string, parser: SqlParser): Promise<ParsedStatement[]> {
     if(sql.trim() === "") {
         throw new GuardRejectionError({ allowed: false, kind: "syntax", reason: "no SQL statement was given" });
     }
 
     let rawStatements: RawStatement[];
     try {
-        const parsed = await parse(sql);
-        rawStatements = (parsed.stmts ?? []) as unknown as RawStatement[];
+        rawStatements = await parser.parse(sql);
     }
     catch(ex) {
+        if(ex instanceof SqlParserUnavailableError) throw ex;
         let position = "";
         const details = (ex as { sqlDetails?: { cursorPosition?: number } }).sqlDetails;
         if(details?.cursorPosition != null) {

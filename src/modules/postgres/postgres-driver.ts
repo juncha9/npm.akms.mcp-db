@@ -9,7 +9,8 @@ import type { DbProfile, ExecuteResult, ParsedStatement, ResultField, StatementR
 import { $logger } from "@/_libs/logger";
 import { describeError } from "@/_libs/text";
 import { GuardRejectionError } from "@/modules/guard/guard-error";
-import { parseStatements } from "@/modules/guard/parse";
+import { parseStatementsWithParser } from "@/modules/guard/parse";
+import { SqlParser } from "@/modules/guard/sql-parser";
 import { changesSchema, checkStatements, writesData } from "@/modules/guard/rules";
 import { ChannelSocket } from "@/modules/tunnel/channel-socket";
 import { SshTunnel } from "@/modules/tunnel/ssh-tunnel";
@@ -333,6 +334,7 @@ export class PostgresDriver {
     readonly profile: DbProfile;
     readonly tunnel: SshTunnel | null = null;
     private readonly pool: pg.Pool;
+    private readonly parser = new SqlParser();
     /** Clients checked out by a running execute() — what abortActiveConnections() and close() cut. */
     private readonly activeClients = new Set<pg.PoolClient>();
 
@@ -384,6 +386,11 @@ export class PostgresDriver {
         });
     }
 
+    /** Parse without executing, sharing the driver's worker with tool preflight checks. */
+    parse(sql: string): Promise<ParsedStatement[]> {
+        return parseStatementsWithParser(sql, this.parser);
+    }
+
     /**
      * Parses, screens and runs `sql`.
      *
@@ -418,7 +425,7 @@ export class PostgresDriver {
         const params = options.params ?? [];
 
         // (2) Guard
-        const statements = await parseStatements(sql);
+        const statements = await this.parse(sql);
         let guardPolicy = policy;
         if(options.internalSql == true) {
             guardPolicy = { ...policy, denyPatterns: [], allowDdl: true };
@@ -686,12 +693,13 @@ export class PostgresDriver {
     }
 
     /** Connects step by step — SSH, then the database — and reports each, for `--check`. */
-    async check(): Promise<CheckReport> {
+    async check(onProgress?: (stage: "ssh" | "database") => void): Promise<CheckReport> {
         const report: CheckReport = { ssh: null, database: null };
 
         if(this.tunnel != null) {
             const sshStartedAt = Date.now();
             try {
+                onProgress?.("ssh");
                 await this.tunnel.connect();
                 report.ssh = {
                     ok: true,
@@ -716,6 +724,7 @@ export class PostgresDriver {
 
         const databaseStartedAt = Date.now();
         try {
+            onProgress?.("database");
             const result = await this.pool.query(
                 "SELECT split_part(version(), ' ', 2) AS version, current_database() AS database, current_user AS user_name, "
                 + "(SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()) AS ssl, current_setting('statement_timeout') AS statement_timeout"
@@ -755,8 +764,11 @@ export class PostgresDriver {
     async close(): Promise<void> {
         // pool.end() waits for checked-out clients; a call stuck on an unresponsive server would hold shutdown forever
         this.abortActiveConnections(new Error("the server is shutting down"));
-        await this.pool.end();
-        this.tunnel?.close();
+        try {
+            await Promise.all([this.parser.close(), this.pool.end()]);
+        } finally {
+            this.tunnel?.close();
+        }
     }
 }
 

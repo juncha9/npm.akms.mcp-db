@@ -5,6 +5,7 @@ export default defineConfig([
     {
         entry: ["src/index.ts"],
         format: ["esm", "cjs"],
+        shims: true,
         target: "node22",
         platform: "node",
         outDir: "lib",

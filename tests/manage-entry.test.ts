@@ -30,17 +30,16 @@ describe("answersToEntry — what gets written", () => {
         expect(entry.env).toEqual({ DB_DRIVER: "postgres", DB_HOST: "10.0.0.5", DB_NAME: "akms", DB_USER: "app_user" });
     });
 
-    it("launches the package through npx, behind cmd /c on Windows", () => {
+    it("creates a direct installed launch without npx", () => {
         const entry = answersToEntry(createAnswers());
-
-        if(process.platform === "win32") {
-            expect(entry.command).toBe("cmd");
-            expect(entry.args).toEqual(["/c", "npx", "-y", "@akms/mcp-db"]);
-        }
-        else {
-            expect(entry.command).toBe("npx");
-            expect(entry.args).toEqual(["-y", "@akms/mcp-db"]);
-        }
+        expect(entry.command).not.toBe("npx");
+        expect(entry.command).not.toBe("cmd");
+        expect(entry.args).not.toContain("npx");
+        expect(isOurEntry(entry)).toBe(true);
+        if(entry.args.length) {
+            expect(entry.command).toBe(process.execPath);
+            expect(entry.args[0].replace(/\\/g, "/")).toMatch(/node_modules\/@akms\/mcp-db\/lib\/cli\.js$/);
+        } else expect(entry.command).toBe("akms-mcp-db");
     });
 
     it("writes every answered setting under its variable", () => {
