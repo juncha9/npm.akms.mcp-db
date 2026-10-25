@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { removeTempDirectory } from "./support/remove-temp-directory";
 import os from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
@@ -32,7 +33,9 @@ beforeEach(() => {
     };
     registry = new Registry([json, toml], path.join(directory, "registry.json"), { find: (kind) => ({ command: process.execPath, args: [path.join(directory, "node_modules", "@akms", `mcp-${kind}`, "lib", "cli.js")], version: "1.0.0", linked: false }) });
 });
-afterEach(() => { if(path.dirname(path.resolve(directory)) !== path.resolve(os.tmpdir()) || !path.basename(directory).startsWith("akms-register-")) throw new Error("Unexpected cleanup target"); fs.rmSync(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 }); });
+afterEach(async () => {
+    await removeTempDirectory(directory, "akms-register-");
+}, 15_000);
 
 async function screen(lines: string[], run: (prompter: Prompter) => Promise<unknown>): Promise<string> {
     const input = new PassThrough();

@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { removeTempDirectory } from "./support/remove-temp-directory";
 import os from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
@@ -12,7 +13,12 @@ import { createJsonFileTarget } from "../src/modules/manage/targets/json-file";
 
 let directory: string;
 beforeEach(() => { directory = fs.mkdtempSync(path.join(os.tmpdir(), "akms runtime ")); vi.stubEnv("AKMS_MCP_HOME", directory); fs.writeFileSync(path.join(directory, "registry.json"), JSON.stringify({ version: 1, clients: [], connections: {} })); });
-afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.restoreAllMocks(); fs.rmSync(directory, { recursive: true, force: true }); });
+afterEach(async () => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+    await removeTempDirectory(directory, "akms runtime ");
+}, 15_000);
 const legacy = () => ({ command: "cmd", args: ["/c", "npx", "-y", "@akms/mcp-db@0.2.1"], env: { DB_HOST: "db.local", DB_PASSWORD: "test-secret", CUSTOM: "keep" } });
 function fixture() {
     const root = path.join(directory, "node_modules");
