@@ -1,5 +1,5 @@
 export const SERVER_NAME = "akms-mcp-db";
-export const SERVER_VERSION = "0.3.1";
+export const SERVER_VERSION = "0.3.2";
 /** Package identity used to recognize existing MCP entries. */
 export const PACKAGE_NAME = "@akms/mcp-db";
 
