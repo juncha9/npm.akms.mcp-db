@@ -1,5 +1,7 @@
 # @akms/mcp-db
 
+> **Archived.** This package moved into `@akms/mcp` in 0.4.0, which carries the Database, SSH, WSL and S3 servers in one package. Run `npx -y @akms/mcp@latest`, open **Runtime**, install the runtime, then choose **Migrate registry**. This repository is read-only and 0.3.2 is its last release.
+
 MCP server that lets an AI agent query **one pre-registered database** — directly, or through an **SSH tunnel it opens itself** — behind a guard that reads every statement with the real PostgreSQL parser.
 
 Built because the database we needed to reach (RDS, not publicly accessible) sits behind a bastion, and the MCP server we used could neither tunnel nor tell `DELETE FROM users` from `DELETE FROM users WHERE id = 1`. The design record, with the measurements behind each choice, is [DESIGN.md](DESIGN.md) in the repository.
